@@ -1,0 +1,19 @@
+import assert from 'node:assert/strict';
+import { hashToken, randomToken, isOpen, isEnded, cors } from '../supabase/functions/phototeam/security.ts';
+const token = randomToken();
+assert.match(token, /^[0-9a-f]{64}$/);
+assert.notEqual(randomToken(), token);
+assert.equal((await hashToken(token)).length, 64);
+assert.notEqual(await hashToken(token), token);
+assert.equal(await hashToken(token), await hashToken(token));
+const past = new Date(Date.now()-60_000).toISOString();
+const future = new Date(Date.now()+60_000).toISOString();
+assert.equal(isOpen({status:'running',ends_at:future}), true);
+assert.equal(isOpen({status:'running',ends_at:past}), false);
+assert.equal(isOpen({status:'paused',ends_at:future}), false);
+assert.equal(isEnded({status:'running',ends_at:past}), true);
+assert.equal(isEnded({status:'running',ends_at:future}), false);
+assert.equal(isEnded({status:'ended',ends_at:null}), true);
+assert.equal(cors['Access-Control-Allow-Origin'], 'https://phototeam.vercel.app');
+console.log('Security helper checks passed');
+
