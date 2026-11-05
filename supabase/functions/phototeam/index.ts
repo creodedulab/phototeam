@@ -105,7 +105,7 @@ Deno.serve(async req => {
       const room = await loadRoom(t.room_id);
       const [missions, submissions] = await Promise.all([
         db.from('room_missions').select('id,position,title,description').eq('room_id', room.id).order('position'),
-        db.from('submissions').select('id,mission_id,photo_path,title,description,message').eq('team_id', t.id),
+        db.from('submissions').select('id,mission_id,photo_path,title,description,message,updated_at').eq('team_id', t.id),
       ]);
       assertOk(missions.error); assertOk(submissions.error);
       const items = await Promise.all((submissions.data || []).map(async x => ({ ...x, photo_url: body.light === true ? undefined : await signed(x.photo_path), photo_path: undefined })));
