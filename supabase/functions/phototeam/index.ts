@@ -119,19 +119,24 @@ Deno.serve(async req => {
       return reply({ ok: true });
     }
     if (action.startsWith('admin_') && !(await admin(token))) return reply({ error: '관리자 로그인이 필요합니다.' }, 401);
+    if (action === 'admin_logout') {
+      const result = await db.from('admin_sessions').delete().eq('token_hash', await hashToken(token));
+      assertOk(result.error); return reply({ok:true});
+    }
     if (action === 'admin_rooms') {
       const result = await db.from('rooms').select('id,name,event_date,code,status,ends_at,remaining_seconds,created_at').order('created_at', { ascending: false });
       assertOk(result.error); return reply({ rooms: result.data, server_time: new Date().toISOString() });
     }
     if (action === 'admin_room') {
       const room = await loadRoom(clean(body.room_id, 36));
+      const reveal = isEnded(room);
       const [missions, teams, submissions] = await Promise.all([
         db.from('room_missions').select('id,position,title,description').eq('room_id', room.id).order('position'),
         db.from('teams').select('id,name').eq('room_id', room.id).order('name'),
-        db.from('submissions').select(isEnded(room) ? 'id,team_id,mission_id,photo_path,title,description,message' : 'id,team_id,mission_id').eq('room_id', room.id),
+        db.from('submissions').select(reveal ? 'id,team_id,mission_id,photo_path,title,description,message' : 'id,team_id,mission_id').eq('room_id', room.id),
       ]);
       assertOk(missions.error); assertOk(teams.error); assertOk(submissions.error);
-      const rows = isEnded(room) ? await Promise.all((submissions.data || []).map(async (x: any) => ({ ...x, photo_url: await signed(x.photo_path), photo_path: undefined }))) : submissions.data;
+      const rows = reveal ? await Promise.all((submissions.data || []).map(async (x: any) => ({ ...x, photo_url: await signed(x.photo_path), photo_path: undefined }))) : submissions.data;
       return reply({ room, missions: missions.data, teams: teams.data, submissions: rows, server_time: new Date().toISOString() });
     }
     if (action === 'admin_timer') {
