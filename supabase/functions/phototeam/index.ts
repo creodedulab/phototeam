@@ -18,9 +18,18 @@ async function admin(token: string) {
 }
 async function team(token: string) {
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
-  const { data, error } = await db.from('teams').select('id,room_id,name').eq('token_hash', await hashToken(token)).maybeSingle();
-  if (error) throw error;
-  return data;
+  const hash = await hashToken(token);
+  const session = await db.from('team_sessions').select('team_id,expires_at').eq('token_hash',hash).maybeSingle();
+  if (session.error) throw session.error;
+  if (session.data && Date.parse(session.data.expires_at) > Date.now()) {
+    const result = await db.from('teams').select('id,room_id,name').eq('id',session.data.team_id).maybeSingle();
+    if (result.error) throw result.error;
+    return result.data;
+  }
+  // Tokens issued before team passwords existed continue to work on the original device.
+  const legacy = await db.from('teams').select('id,room_id,name').eq('token_hash',hash).is('password_hash',null).maybeSingle();
+  if (legacy.error) throw legacy.error;
+  return legacy.data;
 }
 async function loadRoom(id: string) {
   const { data, error } = await db.from('rooms').select('*').eq('id', id).single();
@@ -66,21 +75,29 @@ Deno.serve(async req => {
       if (!result.data) return reply({ error: '비밀번호를 확인해 주세요. 실패가 반복되면 잠시 후 다시 시도해 주세요.' }, 401);
       return reply({ token: newToken });
     }
-    if (action === 'join') {
-      const code = clean(body.code, 20).toUpperCase();
-      const name = clean(body.name, 50);
-      const { data: room, error } = await db.from('rooms').select('id,status,ends_at').eq('code', code).maybeSingle();
-      assertOk(error);
-      if (!room) return reply({ error: '입장 코드를 확인해 주세요.' }, 404);
-      const existing = await team(token);
-      if (existing && existing.room_id === room.id) return reply({ token, team: existing });
-      if (!name) return reply({ error: '팀 이름을 입력해 주세요.' }, 400);
-      if (isEnded(room)) return reply({ error: '종료된 방입니다.' }, 403);
-      const newToken = randomToken();
-      const result = await db.from('teams').insert({ room_id: room.id, name, token_hash: await hashToken(newToken) }).select('id,room_id,name').single();
-      if (result.error?.code === '23505') return reply({ error: '이미 사용 중인 팀 이름입니다. 다른 이름을 입력해 주세요.' }, 409);
+    if (action === 'team_check') {
+      const code=clean(body.code,20).toUpperCase(), name=clean(body.name,50);
+      if (!code || !name) return reply({ error: '입장 코드와 팀 이름을 입력해 주세요.' },400);
+      const oldHash=/^[0-9a-f]{64}$/.test(token) ? await hashToken(token) : null;
+      const result=await db.rpc('check_team_registration',{p_code:code,p_name:name,p_old_hash:oldHash});
       assertOk(result.error);
-      return reply({ token: newToken, team: result.data });
+      if (result.data === 'invalid_room') return reply({error:'입장 코드를 확인해 주세요.'},404);
+      return reply({status:result.data});
+    }
+    if (action === 'join') {
+      const code=clean(body.code,20).toUpperCase(), name=clean(body.name,50);
+      const password=typeof body.password === 'string' ? body.password : '';
+      const confirmation=typeof body.confirmation === 'string' ? body.confirmation : null;
+      if (!code || !name || Array.from(password).length<8 || new TextEncoder().encode(password).length>72) return reply({error:'입장 코드, 팀 이름, 8자 이상 비밀번호를 확인해 주세요.'},400);
+      const newToken=randomToken(), oldHash=/^[0-9a-f]{64}$/.test(token) ? await hashToken(token) : null;
+      const result=await db.rpc('join_team_password',{p_code:code,p_name:name,p_password:password,p_confirmation:confirmation,p_old_hash:oldHash,p_new_hash:await hashToken(newToken)});
+      assertOk(result.error);
+      const value=result.data;
+      if (value?.status !== 'ok') {
+        const messages={invalid_room:'입장 코드를 확인해 주세요.',invalid:'팀 이름과 비밀번호를 확인해 주세요.',confirmation:'비밀번호 확인이 일치하지 않습니다.',closed:'종료된 방입니다.',legacy_unavailable:'기존 팀은 원래 기기에서 비밀번호를 등록하거나 관리자에게 재설정을 요청해 주세요.',locked:'비밀번호 입력이 여러 번 틀려 15분간 잠겼습니다.',incorrect:'팀 비밀번호가 일치하지 않습니다.'};
+        return reply({error:messages[value?.status] || '입장 정보를 확인해 주세요.',status:value?.status}, value?.status==='invalid_room'?404:400);
+      }
+      return reply({token:newToken,team:{id:value.id,room_id:value.room_id,name:value.name}});
     }
     if (action === 'team_state') {
       const t = await team(token);
@@ -150,11 +167,10 @@ Deno.serve(async req => {
     if (action === 'admin_create_room') {
       const name = clean(body.name, 100), date = clean(body.date, 10);
       if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(body.topics) || body.topics.length !== 6) return reply({ error: '방 이름, 날짜, 미션을 확인해 주세요.' }, 400);
-      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      for (let n = 0; n < 5; n++) {
-        const bytes = crypto.getRandomValues(new Uint8Array(6));
-        const code = Array.from(bytes, x => alphabet[x % alphabet.length]).join('');
-        const result = await db.rpc('create_event_room', { p_name: name, p_date: date, p_code: code, p_topics: body.topics });
+      for (let n = 0; n < 10; n++) {
+        let random; do { random = crypto.getRandomValues(new Uint32Array(1))[0]; } while (random >= 4294000000);
+        const code = String(random % 1000000).padStart(6, '0');
+        const result = await db.rpc('create_event_room_digits', { p_name: name, p_date: date, p_code: code, p_topics: body.topics });
         if (!result.error) return reply({ id: result.data, code });
         if (result.error.code !== '23505') return reply({ error: '선택한 미션을 확인해 주세요.' }, 400);
       }
@@ -181,27 +197,34 @@ Deno.serve(async req => {
     if (action === 'admin_delete_preset') {
       const result = await db.from('presets').delete().eq('id', clean(body.id, 36)); assertOk(result.error); return reply({ ok: true });
     }
+    if (action === 'admin_reset_team_password') {
+      const password=typeof body.password==='string'?body.password:'';
+      if (Array.from(password).length<8 || new TextEncoder().encode(password).length>72) return reply({error:'비밀번호는 8자 이상 72바이트 이하로 입력해 주세요.'},400);
+      const result=await db.rpc('admin_reset_team_password',{p_room_id:clean(body.room_id,36),p_team_id:clean(body.team_id,36),p_password:password});
+      assertOk(result.error); if (!result.data) return reply({error:'팀을 찾을 수 없습니다.'},404);
+      return reply({ok:true});
+    }
     if (action === 'admin_delete') {
       const room = await loadRoom(clean(body.room_id, 36));
       const target = clean(body.target, 15), id = clean(body.id, 36);
       if (!['room','team','submission'].includes(target)) return reply({ error: '삭제 대상을 확인해 주세요.' }, 400);
-      if (target !== 'room' && !isEnded(room)) return reply({ error: '행사 종료 후 삭제할 수 있습니다.' }, 403);
-      if (target === 'room') await removePrefix(room.id);
-      if (target === 'team') {
-        const found = await db.from('teams').select('id').eq('room_id', room.id).eq('id', id).maybeSingle();
-        assertOk(found.error); if (!found.data) return reply({ error: '팀을 찾을 수 없습니다.' }, 404);
-        await removePrefix(room.id + '/' + id);
-      }
       if (target === 'submission') {
-        const found = await db.from('submissions').select('team_id,mission_id').eq('room_id', room.id).eq('id', id).maybeSingle();
-        assertOk(found.error); if (!found.data) return reply({ error: '제출물을 찾을 수 없습니다.' }, 404);
-        await removePrefix(room.id + '/' + found.data.team_id + '/' + found.data.mission_id);
+        const found=await db.from('submissions').select('id,photo_path').eq('room_id',room.id).eq('id',id).maybeSingle();
+        assertOk(found.error); if (!found.data) return reply({error:'제출물을 찾을 수 없습니다.'},404);
+        const deleted=await db.from('submissions').delete().eq('room_id',room.id).eq('id',id).eq('photo_path',found.data.photo_path).select('id').maybeSingle();
+        assertOk(deleted.error); if (!deleted.data) return reply({error:'제출물이 변경되었습니다. 다시 확인해 주세요.'},409);
+        const removed=await bucket.remove([found.data.photo_path]);
+        if (removed.error) { console.error('Photo cleanup failed'); return reply({error:'제출물은 삭제되었으나 사진 파일 정리에 실패했습니다. 관리자에게 문의해 주세요.'},500); }
+        return reply({ok:true});
       }
-      let result;
-      if (target === 'room') result = await db.from('rooms').delete().eq('id', room.id);
-      else if (target === 'team') result = await db.from('teams').delete().eq('room_id', room.id).eq('id', id);
-      else result = await db.from('submissions').delete().eq('room_id', room.id).eq('id', id);
-      assertOk(result.error); return reply({ ok: true });
+      const table=target==='room'?'rooms':'teams';
+      let query=db.from(table).delete().eq('id',target==='room'?room.id:id);
+      if (target==='team') query=query.eq('room_id',room.id);
+      const deleted=await query.select('id').maybeSingle();
+      assertOk(deleted.error); if (!deleted.data) return reply({error:'대상을 찾을 수 없습니다.'},404);
+      try { await removePrefix(target==='room'?room.id:room.id+'/'+id); }
+      catch { console.error('Photo cleanup failed'); return reply({error:'방 또는 팀은 삭제되었으나 사진 파일 정리에 실패했습니다. 관리자에게 문의해 주세요.'},500); }
+      return reply({ok:true});
     }
     return reply({ error: '지원하지 않는 요청입니다.' }, 404);
   } catch (error) {

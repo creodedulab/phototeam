@@ -8,6 +8,15 @@ const context={document:{getElementById:id=>id==='app'?root:null},sessionStorage
 vm.runInNewContext(source,context);
 assert.match(root.innerHTML,/포토팀빌딩/);
 assert.match(root.innerHTML,/관리자 입장/);
+assert.match(root.innerHTML,/id="teamPassword"/);
+assert.match(root.innerHTML,/id="confirmWrap" hidden/);
+assert.doesNotMatch(source,/requestFullscreen/);
+vm.runInNewContext(`appState.room={status:'ended'};appState.teams=[{id:'t',name:'팀'}];appState.missions=[{id:'m',title:'미션'}];appState.submissions=[{team_id:'t',mission_id:'m',photo_url:'https://test.invalid/p.jpg',title:'제목',description:'설명',message:'한마디'}];openPresentation()`,context);
+assert.match(root.innerHTML,/presentation-body/);
+assert.ok(root.innerHTML.indexOf('presentation-image') < root.innerHTML.indexOf('presentation-copy'));
+vm.runInNewContext('togglePresentationSize()',context);
+assert.match(root.innerHTML,/presentation-shell is-wide/);
+assert.match(root.innerHTML,/작은 화면으로/);
 assert.doesNotMatch(root.innerHTML,/관리자 체험 코드|ADMIN/);
 assert.equal(vm.runInNewContext(`h('<script>"&')`,context), '&lt;script&gt;&quot;&amp;');
 console.log('Client startup and HTML escaping checks passed');
