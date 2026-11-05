@@ -1,5 +1,5 @@
 import { hashToken, isEnded, isOpen, randomToken, reply, cors } from './security.ts';
-import { createClient } from 'npm:@supabase/supabase-js@2.49.10';
+import { createClient } from 'npm:@supabase/supabase-js@2.119.0';
 
 const url = Deno.env.get('SUPABASE_URL')!;
 const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}');
@@ -209,4 +209,5 @@ Deno.serve(async req => {
     return reply({ error: '요청을 처리하지 못했습니다. 다시 시도해 주세요.' }, 500);
   }
 });
+
 
