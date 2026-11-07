@@ -19,6 +19,8 @@ export function isOpen(room: { status: string; ends_at: string | null }): boolea
   return room.status === 'running' && room.ends_at !== null && Date.parse(room.ends_at) > Date.now();
 }
 export function isEnded(room: { status: string; ends_at: string | null }): boolean {
-  return room.status === 'ended';
+  // Before the manual-finish feature, an expired timer exposed the gallery.
+  // Preserve access for those earlier rooms until a timer is restarted.
+  return room.status === 'ended' || (room.status === 'running' && room.ends_at !== null && Date.parse(room.ends_at) < Date.parse('2026-11-07T14:54:16Z'));
 }
 
