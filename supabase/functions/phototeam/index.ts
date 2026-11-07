@@ -88,7 +88,7 @@ Deno.serve(async req => {
       const code=clean(body.code,20).toUpperCase(), name=clean(body.name,50);
       const password=typeof body.password === 'string' ? body.password : '';
       const confirmation=typeof body.confirmation === 'string' ? body.confirmation : null;
-      if (!code || !name || Array.from(password).length<8 || new TextEncoder().encode(password).length>72) return reply({error:'입장 코드, 팀 이름, 8자 이상 비밀번호를 확인해 주세요.'},400);
+      if (!code || !name || Array.from(password).length<4 || new TextEncoder().encode(password).length>72) return reply({error:'입장 코드, 팀 이름, 4자 이상 비밀번호를 확인해 주세요.'},400);
       const newToken=randomToken(), oldHash=/^[0-9a-f]{64}$/.test(token) ? await hashToken(token) : null;
       const result=await db.rpc('join_team_password',{p_code:code,p_name:name,p_password:password,p_confirmation:confirmation,p_old_hash:oldHash,p_new_hash:await hashToken(newToken)});
       assertOk(result.error);
@@ -205,7 +205,7 @@ Deno.serve(async req => {
     }
     if (action === 'admin_reset_team_password') {
       const password=typeof body.password==='string'?body.password:'';
-      if (Array.from(password).length<8 || new TextEncoder().encode(password).length>72) return reply({error:'비밀번호는 8자 이상 72바이트 이하로 입력해 주세요.'},400);
+      if (Array.from(password).length<4 || new TextEncoder().encode(password).length>72) return reply({error:'비밀번호는 4자 이상 72바이트 이하로 입력해 주세요.'},400);
       const result=await db.rpc('admin_reset_team_password',{p_room_id:clean(body.room_id,36),p_team_id:clean(body.team_id,36),p_password:password});
       assertOk(result.error); if (!result.data) return reply({error:'팀을 찾을 수 없습니다.'},404);
       return reply({ok:true});

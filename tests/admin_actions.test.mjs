@@ -6,6 +6,8 @@ const req=body=>new Request('https://test.invalid',{method:'POST',headers:{'cont
 let r=await handler(req({action:'admin_delete',target:'submission',room_id:'r',id:'s',token:'invalid'}));assert.equal(r.status,401);assert.equal(removed.length,0);
 r=await handler(req({action:'admin_delete',target:'submission',room_id:'r',id:'s',token:'a'.repeat(64)}));assert.equal(r.status,200);assert.deepEqual(removed,['r/t/m/file.jpg']);
 r=await handler(req({action:'admin_reset_team_password',room_id:'r',team_id:'t',password:'newpass123',token:'invalid'}));assert.equal(r.status,401);assert.equal(resetCalls,0);
-r=await handler(req({action:'admin_reset_team_password',room_id:'r',team_id:'t',password:'newpass123',token:'a'.repeat(64)}));assert.equal(r.status,200);assert.equal(resetCalls,1);
+r=await handler(req({action:'admin_reset_team_password',room_id:'r',team_id:'t',password:'123',token:'a'.repeat(64)}));assert.equal(r.status,400);assert.equal(resetCalls,0);
+r=await handler(req({action:'admin_reset_team_password',room_id:'r',team_id:'t',password:'1234',token:'a'.repeat(64)}));assert.equal(r.status,200);assert.equal(resetCalls,1);
+r=await handler(req({action:'admin_reset_team_password',room_id:'r',team_id:'t',password:'newpass123',token:'a'.repeat(64)}));assert.equal(r.status,200);assert.equal(resetCalls,2);
 console.log('Admin delete and password recovery authorization checks passed');
 
