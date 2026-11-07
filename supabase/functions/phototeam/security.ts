@@ -15,8 +15,8 @@ export async function hashToken(value: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 }
-export function isOpen(room: { status: string; ends_at: string | null }): boolean {
-  return room.status === 'running' && room.ends_at !== null && Date.parse(room.ends_at) > Date.now();
+export function isOpen(room: { status: string; ends_at: string | null; remaining_seconds?: number }): boolean {
+  return (room.status === 'running' && room.ends_at !== null && Date.parse(room.ends_at) > Date.now()) || (room.status === 'paused' && (room.remaining_seconds || 0) > 0);
 }
 export function isEnded(room: { status: string; ends_at: string | null }): boolean {
   // Before the manual-finish feature, an expired timer exposed the gallery.

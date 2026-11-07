@@ -109,11 +109,12 @@ Deno.serve(async req => {
       ]);
       assertOk(missions.error); assertOk(submissions.error);
       const items = await Promise.all((submissions.data || []).map(async x => ({ ...x, photo_url: body.light === true ? undefined : await signed(x.photo_path), photo_path: undefined })));
-      return reply({ team: t, room: { id: room.id, name: room.name, status: room.status, ends_at: room.ends_at, remaining_seconds: room.remaining_seconds }, missions: missions.data, submissions: items, server_time: new Date().toISOString() });
+      return reply({ team: t, room: { id: room.id, name: room.name, status: room.status, ends_at: room.ends_at, remaining_seconds: room.remaining_seconds, generation: room.generation }, missions: missions.data, submissions: items, server_time: new Date().toISOString() });
     }
     if (action === 'submit') {
       const t = await team(token); if (!t) return reply({ error: '다시 입장해 주세요.' }, 401);
-      const room = await loadRoom(t.room_id); if (!isOpen(room)) return reply({ error: '제출 시간이 종료되었거나 일시정지되었습니다.' }, 403);
+      const room = await loadRoom(t.room_id); if (!isOpen(room)) return reply({ error: '제출 시간이 종료되었습니다.' }, 403);
+      if ((body.generation == null && room.generation !== 0) || (body.generation != null && (!Number.isInteger(body.generation) || body.generation !== room.generation))) return reply({error:'방이 재시작되었거나 페이지가 오래되었습니다. 새로고침 후 다시 작성해 주세요.'},409);
       const missionId = clean(body.mission_id, 36), title = clean(body.title, 200), description = clean(body.description, 2000), message = clean(body.message, 500);
       const photo = clean(body.photo, 4500000);
       if (!title || !description || !message || (photo && !/^data:image\/jpeg;base64,/.test(photo))) return reply({ error: '사진과 모든 내용을 입력해 주세요.' }, 400);
@@ -122,15 +123,15 @@ Deno.serve(async req => {
       const old = await db.from('submissions').select('photo_path').eq('team_id', t.id).eq('mission_id', missionId).maybeSingle(); assertOk(old.error);
       if (!photo) {
         if (!old.data?.photo_path) return reply({ error: '사진을 선택해 주세요.' }, 400);
-        const updated = await db.from('submissions').update({title,description,message}).eq('team_id',t.id).eq('mission_id',missionId);
-        if (updated.error) return reply({ error: '시간이 종료되어 저장할 수 없습니다.' }, 409);
+        const updated = await db.from('submissions').update({title,description,message,generation:room.generation}).eq('team_id',t.id).eq('mission_id',missionId).eq('generation',room.generation).select('id').maybeSingle();
+        if (updated.error || !updated.data) return reply({ error: '시간이 종료되었거나 방이 재시작되어 저장할 수 없습니다.' }, 409);
         return reply({ok:true});
       }
       let bytes: Uint8Array; try { bytes = Uint8Array.from(atob(photo.split(',')[1]), c => c.charCodeAt(0)); } catch { return reply({ error: '사진을 읽을 수 없습니다.' }, 400); }
       if (bytes.length > 3_000_000 || bytes.length < 3 || bytes[0] !== 255 || bytes[1] !== 216 || bytes[2] !== 255) return reply({ error: '사진 파일이 올바르지 않습니다.' }, 400);
       const path = `${room.id}/${t.id}/${missionId}/${crypto.randomUUID()}.jpg`;
       const up = await bucket.upload(path, bytes, { contentType: 'image/jpeg', cacheControl: '0' }); assertOk(up.error);
-      const saved = await db.from('submissions').upsert({ room_id: room.id, team_id: t.id, mission_id: missionId, photo_path: path, title, description, message }, { onConflict: 'team_id,mission_id' });
+      const saved = await db.from('submissions').upsert({ room_id: room.id, team_id: t.id, mission_id: missionId, photo_path: path, title, description, message, generation:room.generation }, { onConflict: 'team_id,mission_id' });
       if (saved.error) { await bucket.remove([path]); return reply({ error: '저장하지 못했습니다. 시간이 종료되었는지 확인해 주세요.' }, 409); }
       if (old.data?.photo_path) await bucket.remove([old.data.photo_path]);
       return reply({ ok: true });
@@ -147,19 +148,32 @@ Deno.serve(async req => {
     if (action === 'admin_room') {
       const room = await loadRoom(clean(body.room_id, 36));
       const reveal = isEnded(room) && body.light !== true;
-      const [missions, teams, submissions] = await Promise.all([
+      const [missions, teams, submissions, cleanup] = await Promise.all([
         db.from('room_missions').select('id,position,title,description').eq('room_id', room.id).order('position'),
         db.from('teams').select('id,name').eq('room_id', room.id).order('name'),
         db.from('submissions').select(reveal ? 'id,team_id,mission_id,photo_path,title,description,message' : 'id,team_id,mission_id').eq('room_id', room.id),
+        db.from('restart_photo_cleanup').select('photo_path').eq('room_id',room.id).limit(1),
       ]);
-      assertOk(missions.error); assertOk(teams.error); assertOk(submissions.error);
+      assertOk(missions.error); assertOk(teams.error); assertOk(submissions.error); assertOk(cleanup.error);
       const rows = reveal ? await Promise.all((submissions.data || []).map(async (x: any) => ({ ...x, photo_url: await signed(x.photo_path), photo_path: undefined }))) : submissions.data;
-      return reply({ room, missions: missions.data, teams: teams.data, submissions: rows, server_time: new Date().toISOString() });
+      return reply({ room, missions: missions.data, teams: teams.data, submissions: rows, cleanup_pending:(cleanup.data||[]).length>0, server_time: new Date().toISOString() });
     }
     if (action === 'admin_timer') {
       const result = await db.rpc('change_event_timer', { p_room_id: clean(body.room_id,36), p_command: clean(body.command,10), p_seconds: body.seconds == null ? null : Number(body.seconds) });
       if (result.error) return reply({ error: '시간이나 행사 상태를 확인해 주세요.' }, 409);
       return reply({ room: result.data, server_time: new Date().toISOString() });
+    }
+    if (action === 'admin_restart' || action === 'admin_restart_cleanup') {
+      const roomId=clean(body.room_id,36);
+      if(action==='admin_restart') { const reset=await db.rpc('restart_room',{p_room_id:roomId}); assertOk(reset.error); }
+      const queued=await db.from('restart_photo_cleanup').select('photo_path').eq('room_id',roomId); assertOk(queued.error);
+      const paths=(queued.data||[]).map((x: {photo_path:string})=>x.photo_path);
+      for(let i=0;i<paths.length;i+=100){
+        const batch=paths.slice(i,i+100), removed=await bucket.remove(batch);
+        if(removed.error) return reply({error:'방은 재시작되었지만 일부 사진 파일 정리에 실패했습니다. 파일 정리 재시도 버튼을 눌러 주세요.',cleanup_pending:true},500);
+        const cleared=await db.from('restart_photo_cleanup').delete().eq('room_id',roomId).in('photo_path',batch); assertOk(cleared.error);
+      }
+      return reply({ok:true});
     }
     if (action === 'admin_topics') {
       const result = await db.from('topics').select('*').order('title'); assertOk(result.error); return reply({ topics: result.data });
@@ -179,7 +193,7 @@ Deno.serve(async req => {
     if (action === 'admin_edit_missions') {
       if (!Array.isArray(body.topics) || body.topics.length < 1 || body.topics.length > 10 || body.topics.some((x: unknown) => typeof x !== 'string' || x.length > 41)) return reply({error:'미션을 확인해 주세요.'},400);
       const result=await db.rpc('edit_room_missions',{p_room_id:clean(body.room_id,36),p_topics:body.topics});
-      if(result.error) return reply({error:'제출된 미션은 변경하거나 삭제할 수 없습니다. 미션 선택을 확인해 주세요.'},409);
+      if(result.error) return reply({error:'제출된 미션은 삭제할 수 없습니다. 미션 선택을 확인해 주세요.'},409);
       return reply({ok:true});
     }
     if (action === 'admin_save_topic') {

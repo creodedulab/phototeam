@@ -8,9 +8,9 @@ roomEnd=future;
 class Query {
  constructor(table){this.table=table;this.columns=''}
  select(columns){this.columns=columns;queries.push({table:this.table,columns});return this}
- eq(){return this} order(){return this} maybeSingle(){return this.result()} single(){return this.result()}
+ eq(){return this} order(){return this} limit(){return this} maybeSingle(){return this.result()} single(){return this.result()}
  then(resolve,reject){return this.result().then(resolve,reject)}
- async result(){if(this.table==='admin_sessions')return {data:{expires_at:future},error:null};if(this.table==='rooms')return {data:{id:'room',status:roomStatus,ends_at:roomEnd},error:null};if(this.table==='room_missions'||this.table==='teams')return {data:[],error:null};if(this.table==='submissions')return {data:this.columns.includes('photo_path')?[{photo_path:'private/photo.jpg'}]:[],error:null};throw Error('Unexpected table '+this.table)}
+ async result(){if(this.table==='admin_sessions')return {data:{expires_at:future},error:null};if(this.table==='rooms')return {data:{id:'room',status:roomStatus,ends_at:roomEnd},error:null};if(this.table==='room_missions'||this.table==='teams'||this.table==='restart_photo_cleanup')return {data:[],error:null};if(this.table==='submissions')return {data:this.columns.includes('photo_path')?[{photo_path:'private/photo.jpg'}]:[],error:null};throw Error('Unexpected table '+this.table)}
 }
 const mock={from:t=>new Query(t),storage:{from:()=>({createSignedUrl:async()=>{signedCount++;return {data:{signedUrl:'https://test.invalid/signed'},error:null}}})}};
 let source=fs.readFileSync('supabase/functions/phototeam/index.ts','utf8').replace(/^import .*;\r?\n/gm,'');

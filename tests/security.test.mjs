@@ -11,6 +11,8 @@ const future = new Date(Date.now()+60_000).toISOString();
 assert.equal(isOpen({status:'running',ends_at:future}), true);
 assert.equal(isOpen({status:'running',ends_at:past}), false);
 assert.equal(isOpen({status:'paused',ends_at:future}), false);
+assert.equal(isOpen({status:'paused',ends_at:null,remaining_seconds:60}), true);
+assert.equal(isOpen({status:'paused',ends_at:null,remaining_seconds:0}), false);
 assert.equal(isEnded({status:'running',ends_at:'2026-11-07T14:55:00Z'}), false);
 assert.equal(isEnded({status:'running',ends_at:'2026-11-07T14:00:00Z'}), true);
 assert.equal(isEnded({status:'running',ends_at:future}), false);
