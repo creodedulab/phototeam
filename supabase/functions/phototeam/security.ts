@@ -19,6 +19,6 @@ export function isOpen(room: { status: string; ends_at: string | null }): boolea
   return room.status === 'running' && room.ends_at !== null && Date.parse(room.ends_at) > Date.now();
 }
 export function isEnded(room: { status: string; ends_at: string | null }): boolean {
-  return room.status === 'ended' || (room.status === 'running' && room.ends_at !== null && Date.parse(room.ends_at) <= Date.now());
+  return room.status === 'ended';
 }
 

@@ -11,7 +11,7 @@ const future = new Date(Date.now()+60_000).toISOString();
 assert.equal(isOpen({status:'running',ends_at:future}), true);
 assert.equal(isOpen({status:'running',ends_at:past}), false);
 assert.equal(isOpen({status:'paused',ends_at:future}), false);
-assert.equal(isEnded({status:'running',ends_at:past}), true);
+assert.equal(isEnded({status:'running',ends_at:past}), false);
 assert.equal(isEnded({status:'running',ends_at:future}), false);
 assert.equal(isEnded({status:'ended',ends_at:null}), true);
 assert.equal(cors['Access-Control-Allow-Origin'], 'https://phototeam.vercel.app');

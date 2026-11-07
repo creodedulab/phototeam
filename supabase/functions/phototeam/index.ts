@@ -166,7 +166,7 @@ Deno.serve(async req => {
     }
     if (action === 'admin_create_room') {
       const name = clean(body.name, 100), date = clean(body.date, 10);
-      if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(body.topics) || body.topics.length !== 6) return reply({ error: '방 이름, 날짜, 미션을 확인해 주세요.' }, 400);
+      if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(body.topics) || body.topics.length < 1 || body.topics.length > 10 || new Set(body.topics).size !== body.topics.length) return reply({ error: '방 이름, 날짜, 미션을 확인해 주세요.' }, 400);
       for (let n = 0; n < 10; n++) {
         let random; do { random = crypto.getRandomValues(new Uint32Array(1))[0]; } while (random >= 4294000000);
         const code = String(random % 1000000).padStart(6, '0');
@@ -175,6 +175,12 @@ Deno.serve(async req => {
         if (result.error.code !== '23505') return reply({ error: '선택한 미션을 확인해 주세요.' }, 400);
       }
       return reply({ error: '방 코드를 만들지 못했습니다. 다시 시도해 주세요.' }, 500);
+    }
+    if (action === 'admin_edit_missions') {
+      if (!Array.isArray(body.topics) || body.topics.length < 1 || body.topics.length > 10 || body.topics.some((x: unknown) => typeof x !== 'string' || x.length > 41)) return reply({error:'미션을 확인해 주세요.'},400);
+      const result=await db.rpc('edit_room_missions',{p_room_id:clean(body.room_id,36),p_topics:body.topics});
+      if(result.error) return reply({error:'제출된 미션은 변경하거나 삭제할 수 없습니다. 미션 선택을 확인해 주세요.'},409);
+      return reply({ok:true});
     }
     if (action === 'admin_save_topic') {
       const title = clean(body.title, 100), description = clean(body.description, 500), category = clean(body.category, 10);
@@ -188,9 +194,9 @@ Deno.serve(async req => {
     }
     if (action === 'admin_save_preset') {
       const name = clean(body.name, 100), missions = body.missions;
-      if (!name || !Array.isArray(missions) || missions.length !== 6 || new Set(missions).size !== 6) return reply({ error: '조합을 확인해 주세요.' }, 400);
+      if (!name || !Array.isArray(missions) || missions.length < 1 || missions.length > 10 || new Set(missions).size !== missions.length) return reply({ error: '조합을 확인해 주세요.' }, 400);
       const found = await db.from('topics').select('id,category,active').in('id', missions); assertOk(found.error);
-      if (found.data?.filter(x => x.active && x.category === 'easy').length !== 3 || found.data?.filter(x => x.active && x.category === 'creative').length !== 3) return reply({ error: '각 유형에서 주제 3개를 선택해 주세요.' }, 400);
+      if (found.data?.filter(x => x.active).length !== missions.length) return reply({ error: '선택한 주제를 확인해 주세요.' }, 400);
       const result = body.id ? await db.from('presets').update({ name, missions }).eq('id', clean(body.id, 36)).select().single() : await db.from('presets').insert({ name, missions }).select().single();
       assertOk(result.error); return reply({ preset: result.data });
     }
