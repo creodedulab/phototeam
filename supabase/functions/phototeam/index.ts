@@ -166,10 +166,11 @@ Deno.serve(async req => {
     if (action === 'admin_restart' || action === 'admin_restart_cleanup') {
       const roomId=clean(body.room_id,36);
       if(action==='admin_restart') { const reset=await db.rpc('restart_room',{p_room_id:roomId}); assertOk(reset.error); }
-      const queued=await db.from('restart_photo_cleanup').select('photo_path').eq('room_id',roomId); assertOk(queued.error);
-      const paths=(queued.data||[]).map((x: {photo_path:string})=>x.photo_path);
-      for(let i=0;i<paths.length;i+=100){
-        const batch=paths.slice(i,i+100), removed=await bucket.remove(batch);
+      for (;;) {
+        const queued=await db.from('restart_photo_cleanup').select('photo_path').eq('room_id',roomId).limit(100); assertOk(queued.error);
+        const batch=(queued.data||[]).map((x: {photo_path:string})=>x.photo_path);
+        if(!batch.length) break;
+        const removed=await bucket.remove(batch);
         if(removed.error) return reply({error:'방은 재시작되었지만 일부 사진 파일 정리에 실패했습니다. 파일 정리 재시도 버튼을 눌러 주세요.',cleanup_pending:true},500);
         const cleared=await db.from('restart_photo_cleanup').delete().eq('room_id',roomId).in('photo_path',batch); assertOk(cleared.error);
       }
