@@ -12,7 +12,7 @@ class Query {
  then(resolve,reject){return this.result().then(resolve,reject)}
  async result(){if(this.table==='admin_sessions')return {data:{expires_at:future},error:null};if(this.table==='rooms')return {data:{id:'room',status:roomStatus,ends_at:roomEnd},error:null};if(this.table==='room_missions'||this.table==='teams'||this.table==='restart_photo_cleanup')return {data:[],error:null};if(this.table==='submissions')return {data:this.columns.includes('photo_path')?[{photo_path:'private/photo.jpg'}]:[],error:null};throw Error('Unexpected table '+this.table)}
 }
-const mock={from:t=>new Query(t),storage:{from:()=>({createSignedUrl:async()=>{signedCount++;return {data:{signedUrl:'https://test.invalid/signed'},error:null}}})}};
+const mock={from:t=>{assert.match(t,/^phototeam_/);return new Query(t.slice(10))},storage:{from:()=>({createSignedUrl:async()=>{signedCount++;return {data:{signedUrl:'https://test.invalid/signed'},error:null}}})}};
 let source=fs.readFileSync('supabase/functions/phototeam/index.ts','utf8').replace(/^import .*;\r?\n/gm,'');
 source=stripTypeScriptTypes(source,{mode:'strip'});
 const fakeDeno={env:{get:k=>k==='SUPABASE_URL'?'https://test.invalid':k==='SUPABASE_SECRET_KEYS'?'{"default":"secret"}':null},serve:f=>handler=f};
